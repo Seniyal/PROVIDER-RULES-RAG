@@ -16,5 +16,20 @@ services:
     restart: always
     ports: ["8081:8080"]
 
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      PG_DSN: postgresql://app:app@db:5432/rules
+      INDEX_PATH: /app/faiss.index
+      EMBED_MODEL: sentence-transformers/all-MiniLM-L6-v2
+    ports: ["8000:8000"]
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - db
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
 volumes:
   pgdata:

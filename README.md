@@ -1,223 +1,181 @@
-# Provider Rules RAG
+# Provider Rules RAG System — Build Blueprint & Starter Code
 
-A mono-repo application for managing and searching provider rules using RAG (Retrieval-Augmented Generation) capabilities.
+This is a production‑oriented blueprint (with working starter code) to implement the system for surfacing provider rules during healthcare contact center calls.
 
-## Project Structure
+## 0) High‑Level Architecture
 
 ```
-provider-rules-rag/
-├── docker-compose.yml       # Docker Compose configuration
-├── README.md                # This file
-├── backend/                 # FastAPI backend
-│   ├── requirements.txt     # Python dependencies
-│   ├── .env.example         # Environment variables template
-│   ├── Dockerfile           # Backend Docker image
-│   ├── app/
-│   │   ├── __init__.py
-│   │   └── main.py          # FastAPI application entry point
-│   ├── db/
-│   │   └── init.sql         # Database initialization script
-│   └── ingest/
-│       └── ingest.py        # Script for ingesting rules
-└── frontend/                # React + Vite + Tailwind frontend
-    ├── src/
-    │   ├── components/
-    │   │   └── RulesPanel.tsx
-    │   ├── App.tsx
-    │   ├── main.tsx
-    │   └── index.css
-    ├── package.json
-    ├── vite.config.ts
-    ├── tailwind.config.js
-    └── Dockerfile           # Frontend Docker image
+SharePoint/Docs  --->  Ingestion Worker  --->  Embeddings  --->  Vector DB
+ (Word, PDF)          (parse, extract)        (MiniLM)          (FAISS/Pinecone)
+                            |                      |                    \
+                            v                      v                     \
+                        Rule Store  <--------  Metadata/Rules  <----------+
+                        (Postgres)
+
+EHR API  --->  Mapping/Resolver (name ↔ provider_id)  --->  Backend API (FastAPI)  --->  React Agent UI
+                                                   (RAG: retrieve → synthesize → JSON)
 ```
 
-## Prerequisites
+## 1) Data Contracts
 
-- Docker and Docker Compose
-- Python 3.11+ (for local development)
-- Node.js 20+ (for local development)
+### Rule JSON (returned to frontend)
 
-## Quick Start with Docker Compose
-
-1. **Clone the repository** (if applicable)
-
-2. **Start all services:**
-   ```bash
-   docker-compose up --build
-   ```
-
-   This will start:
-   - PostgreSQL database on port 5432
-   - FastAPI backend on port 8000
-   - React frontend on port 5173
-
-3. **Access the application:**
-   - Frontend: http://localhost:5173
-   - Backend API: http://localhost:8000
-   - API Documentation: http://localhost:8000/docs
-
-4. **Stop all services:**
-   ```bash
-   docker-compose down
-   ```
-
-## Local Development Setup
-
-### Backend Setup
-
-1. **Navigate to the backend directory:**
-   ```bash
-   cd backend
-   ```
-
-2. **Create a virtual environment:**
-   ```bash
-   python -m venv venv
-   source venv/bin/activate  # On Windows: venv\Scripts\activate
-   ```
-
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Set up environment variables:**
-   ```bash
-   cp .env.example .env
-   # Edit .env with your configuration
-   ```
-
-5. **Start PostgreSQL** (using Docker Compose or local installation):
-   ```bash
-   docker-compose up postgres -d
-   ```
-
-6. **Run the backend:**
-   ```bash
-   uvicorn app.main:app --reload
-   ```
-
-   The API will be available at http://localhost:8000
-
-### Frontend Setup
-
-1. **Navigate to the frontend directory:**
-   ```bash
-   cd frontend
-   ```
-
-2. **Install dependencies:**
-   ```bash
-   npm install
-   ```
-
-3. **Start the development server:**
-   ```bash
-   npm run dev
-   ```
-
-   The frontend will be available at http://localhost:5173
-
-## Database Setup
-
-The database is automatically initialized when using Docker Compose. The `init.sql` script creates:
-
-- `rules` table for storing provider rules
-- Indexes on `provider` and `category` columns
-- Automatic `updated_at` timestamp trigger
-
-To manually run the initialization script:
-```bash
-psql -U user -d provider_rules -f backend/db/init.sql
+```json
+{
+  "provider_id": "prov_4827",
+  "provider_name": "John Doe, MD",
+  "rules": [
+    {
+      "rule_id": "r_9c0e...",
+      "title": "Referral Prefs",
+      "body": "Prefers faxed referrals only; use cover sheet X.",
+      "source": {
+        "doc_id": "sp_123",
+        "doc_url": "https://sharepoint/...",
+        "page": 4,
+        "version": "2025-10-12"
+      },
+      "tags": ["referral", "fax"],
+      "last_updated": "2025-10-12T14:03:00Z",
+      "confidence": 0.92,
+      "steps": ["Prepare cover sheet X", "Fax to 555-0100"]
+    }
+  ]
+}
 ```
 
-## Ingesting Rules
+### Database Tables (DDL)
 
-Use the ingest script to populate the database with provider rules:
+```sql
+CREATE TABLE IF NOT EXISTS provider_alias (
+  alias_id SERIAL PRIMARY KEY,
+  provider_id TEXT NULL,
+  normalized_alias TEXT NOT NULL,
+  source TEXT CHECK (source IN ('doc','ehr','manual')) DEFAULT 'doc',
+  UNIQUE(provider_id, normalized_alias)
+);
 
-```bash
-cd backend
-python -m ingest.ingest
+CREATE TABLE IF NOT EXISTS provider_rule (
+  rule_id TEXT PRIMARY KEY,
+  provider_canonical_name TEXT NOT NULL,
+  provider_id TEXT NULL,
+  title TEXT,
+  body TEXT NOT NULL,
+  tags TEXT[],
+  doc_id TEXT,
+  doc_url TEXT,
+  page INT,
+  version TEXT,
+  last_updated TIMESTAMPTZ DEFAULT now()
+);
 ```
 
-Or modify `ingest/ingest.py` to ingest your own rules data.
+## 2) Ingestion Pipeline (SharePoint/Word → Rules)
 
-## API Endpoints
+Key steps:
+- Crawl SharePoint (Graph or REST) for Word/PDF docs
+- Parse documents (`python-docx`, `pypdf`)
+- Extract candidate rule blocks by headings/heuristics
+- Entity extraction for provider names and rule types (regex + RapidFuzz/spaCy)
+- Normalize names and upsert into `provider_rule` and `provider_alias`
+- Chunk and embed; upsert vectors into FAISS (or managed vector DB)
 
-- `GET /` - Root endpoint
-- `GET /health` - Health check endpoint
-- `GET /docs` - Interactive API documentation (Swagger UI)
-- `GET /redoc` - Alternative API documentation (ReDoc)
+The starter implementation is in `backend/ingest/ingest.py` and aligns with this flow. Swap FAISS with Pinecone/Weaviate in production if needed.
 
-## Technology Stack
+## 3) Provider Name ↔ EHR ID Resolution
 
-### Backend
-- **FastAPI** - Modern Python web framework
-- **PostgreSQL** - Relational database
-- **SQLAlchemy** - ORM (optional, for future database operations)
-- **Uvicorn** - ASGI server
+Strategy:
+- Deterministic normalization (strip punctuation/honorifics)
+- RapidFuzz token‑set ratio against EHR roster with threshold (≥ 90)
+- Persist approved links in `provider_alias(provider_id, normalized_alias, source='ehr'|'manual')`
+- Add an admin UI for reconciliation (future work)
 
-### Frontend
-- **React** - UI library
-- **TypeScript** - Type-safe JavaScript
-- **Vite** - Build tool and dev server
-- **Tailwind CSS** - Utility-first CSS framework
+## 4) Backend API (FastAPI)
 
-## Development
+OpenAPI sketch:
 
-### Running Tests
-
-Add your test files and run:
-```bash
-# Backend tests
-pytest
-
-# Frontend tests
-npm test
+```
+GET /providers/{provider_id}/rules
+  -> 200 { provider_id, provider_name, rules: Rule[] }
+GET /healthz
 ```
 
-### Building for Production
+Implemented in `backend/app/main.py`:
+- `GET /providers/{provider_id}/rules`: Retrieves rules by vector search on provider aliases; falls back to canonical name filter
+- `GET /healthz`: Basic health
 
-**Backend:**
-```bash
-docker build -t provider-rules-backend ./backend
+Environment variables (see `.env.example`):
+- `PG_DSN` — Postgres DSN
+- `INDEX_PATH` — FAISS index path
+- `EMBED_MODEL` — sentence-transformers model name
+
+## 5) Frontend
+
+The starter UI is in `frontend/` (React + Vite + Tailwind). Create a panel that calls the backend endpoint, e.g. `GET /providers/{providerId}/rules`, and presents steps or body text.
+
+## 6) Deployment (Docker + Options)
+
+Example Dockerfile for backend is included at `backend/Dockerfile`. For local DB:
+- `docker compose up -d db adminer`
+- Connect via Adminer on http://localhost:8081
+
+In production, consider:
+- ECS Fargate (private subnets) + RDS Postgres + managed vector DB
+- Lambda + API Gateway for bursty workloads
+
+## 7) Security & Compliance Checklist (HIPAA‑friendly)
+
+- Data minimization: avoid PHI in logs
+- TLS in transit; encryption at rest
+- JWT/OIDC for agents; per‑tenant RBAC
+- Private networking; no public DB
+- Structured logs and auditability
+- Redaction of PII/PHI before persistence
+- Vendor BAAs if PHI may flow through LLMs
+
+## 8) Monitoring, Quality & Ops
+
+- Metrics: qps, p95 latency, vector hit rate, no‑result rate
+- Tracing: OpenTelemetry spans
+- Logging: correlation IDs, doc/version lineage
+- Evaluation: recall@k, drift checks on re‑index
+
+## 9) Updates & Re‑Indexing
+
+- On SharePoint change or nightly: re‑parse changed docs only
+- Maintain `embedding_version`; rebuild vectors if the model changes
+
+## 10) Testing Strategy
+
+- Unit: parsing, normalization, resolver
+- Integration: end‑to‑end retrieval over seeded corpus
+- Contract: `/providers/{id}/rules` response schema
+
+## 11) Environment Variables (example)
+
+```
+PG_DSN=postgresql://app:app@localhost:5432/rules
+INDEX_PATH=./faiss.index
+EMBED_MODEL=sentence-transformers/all-MiniLM-L6-v2
 ```
 
-**Frontend:**
-```bash
-cd frontend
-npm run build
-```
+## 12) Quick Start
 
-## Environment Variables
+- Backend
+  - `cd backend && cp .env.example .env`
+  - `pip install -r requirements.txt`
+  - `uvicorn app.main:app --reload`
+- Database
+  - `docker compose up -d db adminer`
+  - `psql postgresql://app:app@localhost:5432/rules -c "\dt"`
+- Ingestion
+  - `python backend/ingest/ingest.py`
+- Frontend
+  - `cd frontend && npm install && npm run dev`
 
-### Backend (.env)
+## 13) Notes
 
-- `DATABASE_URL` - PostgreSQL connection string
-- `DEBUG` - Enable debug mode (True/False)
-- `APP_NAME` - Application name
-- `CORS_ORIGINS` - Comma-separated list of allowed origins
-
-## Troubleshooting
-
-1. **Port already in use:**
-   - Change ports in `docker-compose.yml` or stop conflicting services
-
-2. **Database connection errors:**
-   - Ensure PostgreSQL container is running: `docker-compose ps`
-   - Check `DATABASE_URL` in your `.env` file
-
-3. **Frontend can't connect to backend:**
-   - Verify backend is running on port 8000
-   - Check CORS settings in `backend/app/main.py`
-   - Ensure `VITE_API_URL` is set correctly in frontend environment
-
-## License
-
-[Add your license here]
-
-## Contributing
-
-[Add contributing guidelines here]
+- Use Pinecone/Weaviate/Milvus for horizontal scale
+- Prefer `pymupdf`/`unstructured` for heavy PDF workflows
+- Consider on‑prem connectors if LLM usage must be under BAA
 
