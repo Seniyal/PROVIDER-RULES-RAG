@@ -17,3 +17,5 @@ A running record of behaviors and issues found while reading and testing this co
 - ProviderSearch.tsx's `debouncedQ` is misleadingly named — it's computed via `useMemo(() => q.trim(), [q])`, which has no delay mechanism at all; a new fetch fires on every keystroke, not after the user pauses typing.
 
 - RulesPanel.tsx has two leftover debug `console.log` statements (`providerId =`, `Fetching`) that fire in the browser console every time a provider is selected.
+
+- backend/.env.example is formatted as a bash heredoc snippet (`cat > .env <<'EOF' ... EOF`) meant to be run in a shell, not copied as a file — but the README's own Quick Start says to `cp .env.example .env`. Confirmed live: doing that literally still works (python-dotenv extracts the real PG_DSN/INDEX_PATH/EMBED_MODEL values from the middle of the file), but it emits a "could not parse statement" warning and adds a bogus `EOF=None` key.
