@@ -13,3 +13,5 @@ A running record of behaviors and issues found while reading and testing this co
 - The same fallback also leaves stray bullet-point hyphens attached to step text — confirmed live against init.sql's demo3 rule ("- Page main line\n- Step 1: Document in EHR inbox\n- Step 2: Mark as urgent if fever > 102F"): the parsed output is `["- Page main line -", "Document in EHR inbox -", "Mark as urgent if fever > 102F"]`, with leading/trailing "-" characters bleeding into the step text since the fallback's plain re.split doesn't strip the bullet markers the way the primary regex's negative lookahead is meant to.
 
 - frontend/package.json's lint script (`eslint . --ext js,jsx ...`) only checks `.js`/`.jsx` files, but the entire frontend source tree is TypeScript (`.tsx`/`.ts`) — `npm run lint` never actually lints any real source file in this project.
+
+- ProviderSearch.tsx's `debouncedQ` is misleadingly named — it's computed via `useMemo(() => q.trim(), [q])`, which has no delay mechanism at all; a new fetch fires on every keystroke, not after the user pauses typing.
