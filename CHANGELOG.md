@@ -19,3 +19,5 @@ A running record of behaviors and issues found while reading and testing this co
 - RulesPanel.tsx has two leftover debug `console.log` statements (`providerId =`, `Fetching`) that fire in the browser console every time a provider is selected.
 
 - backend/.env.example is formatted as a bash heredoc snippet (`cat > .env <<'EOF' ... EOF`) meant to be run in a shell, not copied as a file — but the README's own Quick Start says to `cp .env.example .env`. Confirmed live: doing that literally still works (python-dotenv extracts the real PG_DSN/INDEX_PATH/EMBED_MODEL values from the middle of the file), but it emits a "could not parse statement" warning and adds a bogus `EOF=None` key.
+
+- docker-compose.yml defines no frontend service at all, even though frontend/Dockerfile exists — `docker compose up` only ever brings up `db`, `adminer`, and `backend`. The frontend is only ever meant to run via `npm install && npm run dev` outside Docker, per the README's own instructions; the Dockerfile appears to be unused/orphaned.
