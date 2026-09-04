@@ -15,3 +15,5 @@ A running record of behaviors and issues found while reading and testing this co
 - frontend/package.json's lint script (`eslint . --ext js,jsx ...`) only checks `.js`/`.jsx` files, but the entire frontend source tree is TypeScript (`.tsx`/`.ts`) — `npm run lint` never actually lints any real source file in this project.
 
 - ProviderSearch.tsx's `debouncedQ` is misleadingly named — it's computed via `useMemo(() => q.trim(), [q])`, which has no delay mechanism at all; a new fetch fires on every keystroke, not after the user pauses typing.
+
+- RulesPanel.tsx has two leftover debug `console.log` statements (`providerId =`, `Fetching`) that fire in the browser console every time a provider is selected.
