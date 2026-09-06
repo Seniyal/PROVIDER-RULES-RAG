@@ -37,3 +37,5 @@ A running record of behaviors and issues found while reading and testing this co
 - docker-compose.yml exposes raw Postgres directly to the host (`ports: ["5432:5432"]`) and runs Adminer, a full DB admin GUI, on `8081` with no auth of its own — reachable with the trivial default credentials (`app`/`app`) set right in the same file. This directly contradicts the project's own README security checklist, which lists "Private networking; no public DB" as a requirement.
 
 - Neither the root .gitignore nor backend/.dockerignore exclude the ingestion pipeline's output files (`faiss.index.npy`, `faiss.index.meta`) — confirmed by grep, no match anywhere. Since these files encode embeddings of the actual provider rule text, they could be accidentally committed after running `ingest.py`, in tension with the README's own checklist item about avoiding PHI persistence.
+
+- The `confidence` field is shown as a real computed value (`0.92`) in the README's example API response and exists on the `Rule` Pydantic model, but it's never actually set anywhere `Rule(...)` is constructed in `get_rules()` — every real response has `confidence: null`.
