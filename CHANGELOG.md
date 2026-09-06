@@ -45,3 +45,5 @@ A running record of behaviors and issues found while reading and testing this co
 - ProviderSearch.tsx's already-un-debounced search effect gets doubled in development by `React.StrictMode` (used in main.tsx), which intentionally double-invokes effects there. The first fetch's result is discarded via the effect's `cancelled` flag, but the actual HTTP request still goes out both times, since nothing uses an AbortController to actually cancel it — every keystroke fires two real network requests, not one.
 
 - `get_rules()` never returns 404 for an unknown provider_id — it always returns 200 with an empty `rules` array, and `provider_name` falls back to just echoing the raw `provider_id` string back (since `aliases` defaults to `[provider_id]` when no real alias exists). This is unlike the sibling `ehr_provider_get` endpoint, which correctly raises a 404 for an ID that doesn't exist.
+
+- The result-count cap of 20 is hardcoded independently in three separate places in main.py — the alias-based SQL fallback's `LIMIT 20`, the vector search's `index.search(qv, 20)`, and the canonical-name SQL fallback's `LIMIT 20` — with no shared named constant anywhere.
